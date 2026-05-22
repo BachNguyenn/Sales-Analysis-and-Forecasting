@@ -1,18 +1,47 @@
 import pandas as pd
 
 
-def preprocess_sales_data(df):
+def clean_raw_data(df):
     """
-    Tiền xử lý dữ liệu bán hàng:
-    - Chuyển Order Date sang datetime
-    - Sắp xếp theo thời gian
-    - Gom doanh số theo tháng
+    Làm sạch dữ liệu gốc.
     """
 
-    df["Order Date"] = pd.to_datetime(df["Order Date"])
+    df = df.copy()
+
+    # Xóa dữ liệu trùng
+    df = df.drop_duplicates()
+
+    # Chuyển cột ngày sang datetime
+    df["Order Date"] = pd.to_datetime(df["Order Date"], dayfirst=True, errors="coerce")
+    df["Ship Date"] = pd.to_datetime(df["Ship Date"], dayfirst=True, errors="coerce")
+
+    # Xóa dòng lỗi ngày
+    df = df.dropna(subset=["Order Date", "Ship Date"])
+
+    # Xử lý giá trị thiếu ở Postal Code
+    df["Postal Code"] = df["Postal Code"].fillna("Unknown")
+
+    # Đảm bảo Sales là kiểu số
+    df["Sales"] = pd.to_numeric(df["Sales"], errors="coerce")
+
+    # Xóa dòng thiếu Sales
+    df = df.dropna(subset=["Sales"])
+
+    # Chỉ giữ Sales > 0
+    df = df[df["Sales"] > 0]
+
+    # Sắp xếp theo thời gian
     df = df.sort_values("Order Date")
 
-    monthly_sales = df.resample("M", on="Order Date")["Sales"].sum().reset_index()
+    return df
+
+
+def create_monthly_sales(df):
+    """
+    Tổng hợp doanh số theo tháng.
+    """
+
+    monthly_sales = df.resample("ME", on="Order Date")["Sales"].sum().reset_index()
     monthly_sales.columns = ["Date", "Sales"]
 
     return monthly_sales
@@ -20,7 +49,7 @@ def preprocess_sales_data(df):
 
 def create_features(monthly_sales):
     """
-    Tạo các biến đầu vào cho mô hình Machine Learning.
+    Tạo đặc trưng cho mô hình Machine Learning.
     """
 
     data = monthly_sales.copy()
