@@ -1,62 +1,68 @@
+import numpy as np
 import pandas as pd
 
 
-def clean_raw_data(df):
+def clean_raw_data(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Làm sạch dữ liệu gốc.
+    Clean raw Superstore sales data.
+
+    Steps:
+    - Remove duplicate rows.
+    - Convert Order Date and Ship Date to datetime.
+    - Fill missing Postal Code values.
+    - Convert Sales to numeric.
+    - Remove invalid dates and invalid sales values.
+    - Create Delivery Days feature.
+    - Sort data by Order Date.
     """
+    data = df.copy()
+    data = data.drop_duplicates()
 
-    df = df.copy()
+    data["Order Date"] = pd.to_datetime(data["Order Date"], dayfirst=True, errors="coerce")
+    data["Ship Date"] = pd.to_datetime(data["Ship Date"], dayfirst=True, errors="coerce")
 
-    # Xóa dữ liệu trùng
-    df = df.drop_duplicates()
+    data = data.dropna(subset=["Order Date", "Ship Date"])
 
-    # Chuyển cột ngày sang datetime
-    df["Order Date"] = pd.to_datetime(df["Order Date"], dayfirst=True, errors="coerce")
-    df["Ship Date"] = pd.to_datetime(df["Ship Date"], dayfirst=True, errors="coerce")
+    if "Postal Code" in data.columns:
+        data["Postal Code"] = data["Postal Code"].fillna("Unknown")
 
-    # Xóa dòng lỗi ngày
-    df = df.dropna(subset=["Order Date", "Ship Date"])
+    data["Sales"] = pd.to_numeric(data["Sales"], errors="coerce")
+    data = data.dropna(subset=["Sales"])
+    data = data[data["Sales"] > 0]
 
-    # Xử lý giá trị thiếu ở Postal Code
-    df["Postal Code"] = df["Postal Code"].fillna("Unknown")
+    data["Delivery Days"] = (data["Ship Date"] - data["Order Date"]).dt.days
+    data = data[data["Delivery Days"] >= 0]
 
-    # Đảm bảo Sales là kiểu số
-    df["Sales"] = pd.to_numeric(df["Sales"], errors="coerce")
-
-    # Xóa dòng thiếu Sales
-    df = df.dropna(subset=["Sales"])
-
-    # Chỉ giữ Sales > 0
-    df = df[df["Sales"] > 0]
-
-    # Sắp xếp theo thời gian
-    df = df.sort_values("Order Date")
-
-    return df
+    data = data.sort_values("Order Date").reset_index(drop=True)
+    return data
 
 
-def create_monthly_sales(df):
-    """
-    Tổng hợp doanh số theo tháng.
-    """
-
+def create_monthly_sales(df: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate sales by month for forecasting."""
     monthly_sales = df.resample("ME", on="Order Date")["Sales"].sum().reset_index()
     monthly_sales.columns = ["Date", "Sales"]
-
     return monthly_sales
 
 
-def create_features(monthly_sales):
+def create_model_features(monthly_sales: pd.DataFrame) -> pd.DataFrame:
     """
-    Tạo đặc trưng cho mô hình Machine Learning.
-    """
+    Convert monthly sales time series into supervised-learning features.
 
+    Features:
+    - year, month, quarter
+    - cyclical month encoding: month_sin, month_cos
+    - lag features: lag_1, lag_2, lag_3
+    - rolling means: rolling_mean_3, rolling_mean_6
+    """
     data = monthly_sales.copy()
+    data["Date"] = pd.to_datetime(data["Date"])
 
     data["year"] = data["Date"].dt.year
     data["month"] = data["Date"].dt.month
     data["quarter"] = data["Date"].dt.quarter
+
+    data["month_sin"] = np.sin(2 * np.pi * data["month"] / 12)
+    data["month_cos"] = np.cos(2 * np.pi * data["month"] / 12)
 
     data["lag_1"] = data["Sales"].shift(1)
     data["lag_2"] = data["Sales"].shift(2)
@@ -65,6 +71,9 @@ def create_features(monthly_sales):
     data["rolling_mean_3"] = data["Sales"].shift(1).rolling(window=3).mean()
     data["rolling_mean_6"] = data["Sales"].shift(1).rolling(window=6).mean()
 
-    data = data.dropna()
-
+    data = data.dropna().reset_index(drop=True)
     return data
+
+
+# Backward-compatible alias for older notebooks
+create_features = create_model_features
